@@ -509,6 +509,8 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
   const [callState, setCallState] = useState<"idle" | "connecting" | "active" | "speaking">("idle");
   const [voiceStatus, setVoiceStatus] = useState("Realtime voice is ready.");
   const [activeModel, setActiveModel] = useState("Gemini Live");
+  const [inputLevel, setInputLevel] = useState(0);
+  const [sessionSeconds, setSessionSeconds] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const inputContextRef = useRef<AudioContext | null>(null);
@@ -523,6 +525,28 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
   useEffect(() => {
     return () => stopVoiceCall();
   }, []);
+
+  useEffect(() => {
+    if (!isCallActive) {
+      setSessionSeconds(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setSessionSeconds((seconds) => seconds + 1);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [isCallActive]);
+
+  useEffect(() => {
+    if (callState === "idle") {
+      setInputLevel(0);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      setInputLevel((level) => Math.max(0, level * 0.78 - 0.015));
+    }, 140);
+    return () => window.clearInterval(interval);
+  }, [callState]);
 
   function toBase64(bytes: Uint8Array) {
     let binary = "";
@@ -627,7 +651,14 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
 
         processor.onaudioprocess = (event) => {
           if (socket.readyState !== WebSocket.OPEN) return;
-          const pcm = floatToPcm16(event.inputBuffer.getChannelData(0));
+          const input = event.inputBuffer.getChannelData(0);
+          let sum = 0;
+          for (let index = 0; index < input.length; index += 1) {
+            sum += input[index] * input[index];
+          }
+          const rms = Math.sqrt(sum / input.length);
+          setInputLevel(Math.min(1, rms * 12));
+          const pcm = floatToPcm16(input);
           socket.send(JSON.stringify({
             type: "audio",
             data: toBase64(pcm),
@@ -711,6 +742,9 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
 
   const statusTitle = callState === "connecting" ? "Connecting..." : callState === "active" ? "Realtime call active" : callState === "speaking" ? "AI speaking..." : "Start voice call";
   const statusText = callState === "connecting" ? "Preparing the secure Gemini Live audio session." : callState === "active" ? "Speak naturally in Arabic or English. Press the microphone to end." : callState === "speaking" ? "The AI is replying by voice only." : "One tap starts a live voice-only bank call.";
+  const sessionTime = `${Math.floor(sessionSeconds / 60).toString().padStart(2, "0")}:${(sessionSeconds % 60).toString().padStart(2, "0")}`;
+  const meterBars = [0.22, 0.48, 0.76, 0.54, 0.34, 0.66, 0.42, 0.24];
+  const visualLevel = callState === "speaking" ? 0.88 : callState === "connecting" ? 0.42 : callState === "active" ? inputLevel : 0.16;
 
   return (
     <section className="pageStack">
@@ -730,25 +764,34 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
         </section>
         <section className="surface voiceOnlySurface">
           <SectionHeader title="Live Voice Call" action="Gemini Live" />
-          <div className="voiceStage">
-            <button className={`callMic ${callState}`} type="button" onClick={toggleVoiceCall} aria-pressed={isCallActive}>
-              <Mic size={42} />
-            </button>
+          <div className={`voiceStage ${callState}`}>
+            <div className="voiceOrbWrap">
+              <span className="voiceRing ringOne" />
+              <span className="voiceRing ringTwo" />
+              <button className={`callMic ${callState}`} type="button" onClick={toggleVoiceCall} aria-pressed={isCallActive} aria-label={isCallActive ? "End voice call" : "Start voice call"}>
+                <Mic size={46} />
+              </button>
+            </div>
             <div className="callStatus">
               <strong>{statusTitle}</strong>
               <span>{statusText}</span>
             </div>
+            <div className={`liveWave ${callState}`} aria-hidden="true">
+              {meterBars.map((bar, index) => (
+                <span key={index} style={{ height: `${18 + Math.round(bar * visualLevel * 76)}px` }} />
+              ))}
+            </div>
+            <div className="callMetrics" aria-label="Voice call status">
+              <div><small>Connection</small><strong>{isCallActive ? "Connected" : "Standby"}</strong></div>
+              <div><small>Microphone</small><strong>{callState === "active" ? "Listening" : callState === "speaking" ? "Paused" : "Ready"}</strong></div>
+              <div><small>Session</small><strong>{sessionTime}</strong></div>
+              <div><small>Language</small><strong>AR / EN</strong></div>
+            </div>
             <div className="transcriptBox">
-              <small>Status</small>
+              <small>{callState === "speaking" ? "AI output" : callState === "active" ? "User input" : "Status"}</small>
               <p>{voiceStatus}</p>
             </div>
-          </div>
-          <div className="voiceMeter" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-            <span />
-            <span />
+            {isCallActive && <button className="endCallButton" type="button" onClick={stopVoiceCall}><PhoneCall size={17} /> End call</button>}
           </div>
         </section>
       </div>
