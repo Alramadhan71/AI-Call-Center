@@ -594,7 +594,8 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
     setVoiceStatus("Connecting Gemini Live voice...");
 
     try {
-      const socket = new WebSocket("ws://localhost:8787/api/gemini-live");
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const socket = new WebSocket(`${wsProtocol}//${window.location.host}/api/gemini-live`);
       socketRef.current = socket;
 
       socket.onopen = async () => {
@@ -728,7 +729,7 @@ function AiConsole({ knowledge }: { knowledge: KnowledgeItem[] }) {
           </div>
         </section>
         <section className="surface voiceOnlySurface">
-          <SectionHeader title="Live Voice Call" action="Local API :8787" />
+          <SectionHeader title="Live Voice Call" action="Gemini Live" />
           <div className="voiceStage">
             <button className={`callMic ${callState}`} type="button" onClick={toggleVoiceCall} aria-pressed={isCallActive}>
               <Mic size={42} />
