@@ -1,6 +1,21 @@
 import { createServer } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import { createReadStream, readFileSync, existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
+
+const root = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(root, "dist");
+const staticTypes = new Map([
+  [".css", "text/css; charset=utf-8"],
+  [".html", "text/html; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".png", "image/png"],
+  [".svg", "image/svg+xml"],
+  [".webmanifest", "application/manifest+json"],
+]);
 
 function loadEnv() {
   if (!existsSync(".env")) return;
@@ -75,6 +90,31 @@ function sendText(response, status, text, contentType = "text/plain") {
     "Access-Control-Allow-Headers": "Content-Type",
   });
   response.end(text);
+}
+
+async function serveStatic(request, response) {
+  if (request.method !== "GET" && request.method !== "HEAD") return false;
+  if (!existsSync(distDir)) return false;
+
+  const url = new URL(request.url || "/", "http://localhost");
+  if (url.pathname.startsWith("/api/") || url.pathname === "/health") return false;
+
+  const requested = path.normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
+  const candidate = path.join(distDir, requested === "/" ? "index.html" : requested);
+  const file = candidate.startsWith(distDir) ? candidate : path.join(distDir, "index.html");
+  const target = await stat(file).then((item) => item.isFile() ? file : path.join(distDir, "index.html")).catch(() => path.join(distDir, "index.html"));
+  const ext = path.extname(target).toLowerCase();
+
+  response.writeHead(200, {
+    "Content-Type": staticTypes.get(ext) || "application/octet-stream",
+    "Cache-Control": target.endsWith("index.html") ? "no-store" : "public, max-age=31536000, immutable",
+  });
+  if (request.method === "HEAD") {
+    response.end();
+    return true;
+  }
+  createReadStream(target).pipe(response);
+  return true;
 }
 
 function wavFromPcm(pcmBytes, sampleRate = 24000, channels = 1, bitsPerSample = 16) {
@@ -280,6 +320,10 @@ const server = createServer(async (request, response) => {
       hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
       gemini: { model, ttsModel, liveModel, hasKey: Boolean(process.env.GEMINI_API_KEY) },
     });
+    return;
+  }
+
+  if (await serveStatic(request, response)) {
     return;
   }
 
