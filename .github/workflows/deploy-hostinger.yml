@@ -51,20 +51,21 @@ jobs:
           fi
           chmod 600 ~/.ssh/hostinger_deploy_key
           ssh-keygen -y -f ~/.ssh/hostinger_deploy_key >/dev/null
-          ssh-keyscan -p "$HOSTINGER_PORT" -H "$HOSTINGER_HOST" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "$HOSTINGER_PORT" -H "$HOSTINGER_HOST" >> ~/.ssh/known_hosts || true
 
       - name: Prepare app directory
         run: |
           ssh -p "$HOSTINGER_PORT" \
             -i ~/.ssh/hostinger_deploy_key \
             -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
             "$HOSTINGER_USER@$HOSTINGER_HOST" \
             "mkdir -p '$APP_DIR'"
 
       - name: Sync files
         run: |
           rsync -azc --delete \
-            -e "ssh -p $HOSTINGER_PORT -i ~/.ssh/hostinger_deploy_key -o IdentitiesOnly=yes" \
+            -e "ssh -p $HOSTINGER_PORT -i ~/.ssh/hostinger_deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
             --exclude ".git" \
             --exclude ".env" \
             --exclude ".env.production" \
@@ -77,5 +78,6 @@ jobs:
           ssh -p "$HOSTINGER_PORT" \
             -i ~/.ssh/hostinger_deploy_key \
             -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
             "$HOSTINGER_USER@$HOSTINGER_HOST" \
             "cd '$APP_DIR' && bash deployment/deploy-hostinger.sh"
